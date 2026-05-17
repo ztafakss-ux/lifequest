@@ -1,0 +1,914 @@
+import { useState, useEffect, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { useAuthStore } from '../../store/authStore';
+import { useUIStore } from '../../store/uiStore';
+import { useNavigate } from 'react-router-dom';
+import { useToast } from '../../hooks/useToast';
+import { PixelPanel } from '../../components/ui/PixelPanel';
+import { PixelButton } from '../../components/ui/PixelButton';
+import type { Workout, Exercise, Routine } from '@lifequest/shared';
+import * as workoutService from '../../services/workout.service';
+import { SageContextButton } from '../../components/sage/SageContextButton';
+import { BodyWeightTracker, OneRMCalculator, WeeklyVolumeWidget, ProgressPhotos, RestTimer } from '../../components/gym/GymExtras';
+
+const MUSCLE_GROUPS = ['Todos', 'Pecho', 'Espalda', 'Hombros', 'Bíceps', 'Tríceps', 'Piernas', 'Core', 'Cardio'];
+
+interface ActiveSet {
+  id: string;
+  weight: string;
+  reps: string;
+  completed: boolean;
+}
+
+interface ActiveExercise {
+  exerciseId: string;
+  name: string;
+  muscleGroup?: string;
+  sets: ActiveSet[];
+  prevBest?: { weight: number; reps: number } | null;
+  personalRecord?: number; // max kg×reps ever
+}
+
+interface ActiveWorkout {
+  id: string;
+  title: string;
+  startTime: number;
+  exercises: ActiveExercise[];
+}
+
+function formatDuration(ms: number) {
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60);
+  const h = Math.floor(m / 60);
+  if (h > 0) return `${h}h ${m % 60}m`;
+  return `${m}m ${s % 60}s`;
+}
+
+function WorkoutTimer({ startTime }: { startTime: number }) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick(t => t + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <span className="font-pixel text-accent-gold" style={{ fontSize: '11px' }}>
+      ⏱ {formatDuration(Date.now() - startTime)}
+    </span>
+  );
+}
+
+// ▲▼ stepper
+function NumericStepper({
+  value,
+  onChange,
+  step = 1,
+  min = 0,
+  disabled,
+  placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  step?: number;
+  min?: number;
+  disabled?: boolean;
+  placeholder?: string;
+}) {
+  const num = parseFloat(value) || 0;
+  return (
+    <div className="flex items-center gap-0.5">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onChange(String(Math.max(min, num - step)))}
+        className="w-5 h-10 border border-border-pixel text-text-secondary hover:text-accent-gold hover:border-accent-gold transition-colors font-pixel disabled:opacity-30"
+        style={{ fontSize: '8px' }}
+      >▼</button>
+      <input
+        type="number"
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder ?? '0'}
+        disabled={disabled}
+        className="w-12 bg-bg-deep border border-border-pixel text-text-primary font-vt text-lg text-center py-1 focus:border-accent-gold outline-none disabled:opacity-50"
+        style={{ height: '40px' }}
+      />
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onChange(String(num + step))}
+        className="w-5 h-10 border border-border-pixel text-text-secondary hover:text-accent-gold hover:border-accent-gold transition-colors font-pixel disabled:opacity-30"
+        style={{ fontSize: '8px' }}
+      >▲</button>
+    </div>
+  );
+}
+
+function ExerciseSearchModal({
+  onSelect,
+  onClose,
+}: {
+  onSelect: (ex: Exercise) => void;
+  onClose: () => void;
+}) {
+  const [search, setSearch] = useState('');
+  const [muscleFilter, setMuscleFilter] = useState('Todos');
+  const [exercises, setExercises] = useState<Exercise[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    workoutService
+      .fetchExercises(search || undefined, muscleFilter !== 'Todos' ? muscleFilter : undefined)
+      .then(data => {
+        setExercises(data);
+        setLoading(false);
+      });
+  }, [search, muscleFilter]);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 bg-black/70 z-50 flex items-end md:items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ y: 40, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        exit={{ y: 40, opacity: 0 }}
+        className="bg-bg-panel border-2 border-border-pixel w-full max-w-md max-h-[80vh] flex flex-col"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="p-3 border-b-2 border-border-pixel space-y-2">
+          <p className="font-pixel text-accent-gold" style={{ fontSize: '9px' }}>AGREGAR EJERCICIO</p>
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Buscar ejercicio..."
+            autoFocus
+            className="w-full bg-bg-deep border-2 border-border-pixel text-text-primary font-vt text-base px-3 py-2 focus:border-accent-gold outline-none"
+          />
+          {/* Muscle group filter */}
+          <div className="flex gap-1 flex-wrap">
+            {MUSCLE_GROUPS.map(mg => (
+              <button
+                key={mg}
+                onClick={() => setMuscleFilter(mg)}
+                className={`font-pixel px-2 py-0.5 border transition-colors ${
+                  muscleFilter === mg
+                    ? 'border-accent-gold text-accent-gold bg-accent-gold/10'
+                    : 'border-border-pixel text-text-secondary hover:border-accent-gold/50'
+                }`}
+                style={{ fontSize: '6px' }}
+              >
+                {mg}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="overflow-y-auto flex-1 p-2">
+          {loading ? (
+            <p className="font-vt text-text-secondary text-center py-4 text-lg">Buscando...</p>
+          ) : exercises.length === 0 ? (
+            <p className="font-vt text-text-secondary text-center py-4 text-lg">Sin resultados</p>
+          ) : (
+            exercises.map(ex => (
+              <button
+                key={ex.id}
+                onClick={() => onSelect(ex)}
+                className="w-full text-left px-3 py-2 hover:bg-bg-panel-light border-b border-border-pixel/30 transition-colors"
+              >
+                <p className="font-vt text-text-primary text-lg">{ex.name}</p>
+                {(ex.muscleGroup || ex.equipment) && (
+                  <p className="font-pixel text-text-secondary" style={{ fontSize: '7px' }}>
+                    {[ex.muscleGroup, ex.equipment].filter(Boolean).join(' · ')}
+                  </p>
+                )}
+              </button>
+            ))
+          )}
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+function ActiveWorkoutView({
+  workout,
+  onFinish,
+}: {
+  workout: ActiveWorkout;
+  onUpdate: (w: ActiveWorkout) => void;
+  onFinish: (w: ActiveWorkout) => void;
+}) {
+  const [activeWorkout, setActiveWorkout] = useState(workout);
+  const [showExSearch, setShowExSearch] = useState(false);
+  const [restTimer, setRestTimer] = useState<number | null>(null);
+  const [newPRs, setNewPRs] = useState<Set<string>>(new Set()); // "exIdx-setIdx"
+
+  useEffect(() => {
+    if (restTimer === null || restTimer <= 0) return;
+    const id = setTimeout(() => setRestTimer(t => (t !== null ? t - 1 : null)), 1000);
+    return () => clearTimeout(id);
+  }, [restTimer]);
+
+  function addExercise(ex: Exercise) {
+    setActiveWorkout(prev => ({
+      ...prev,
+      exercises: [
+        ...prev.exercises,
+        {
+          exerciseId: ex.id,
+          name: ex.name,
+          muscleGroup: ex.muscleGroup,
+          sets: [{ id: '1', weight: '', reps: '', completed: false }],
+          prevBest: null,
+          personalRecord: 0,
+        },
+      ],
+    }));
+  }
+
+  function addSet(exIdx: number) {
+    setActiveWorkout(prev => {
+      const exercises = [...prev.exercises];
+      const ex = exercises[exIdx];
+      // pre-fill with last set values
+      const lastSet = ex.sets[ex.sets.length - 1];
+      exercises[exIdx] = {
+        ...ex,
+        sets: [
+          ...ex.sets,
+          {
+            id: String(ex.sets.length + 1),
+            weight: lastSet?.weight ?? '',
+            reps: lastSet?.reps ?? '',
+            completed: false,
+          },
+        ],
+      };
+      return { ...prev, exercises };
+    });
+  }
+
+  function updateSet(
+    exIdx: number,
+    setIdx: number,
+    field: 'weight' | 'reps' | 'completed',
+    value: string | boolean,
+  ) {
+    setActiveWorkout(prev => {
+      const exercises = [...prev.exercises];
+      const ex = exercises[exIdx];
+      const sets = [...ex.sets];
+      sets[setIdx] = { ...sets[setIdx], [field]: value };
+
+      // Check for PR when completing a set
+      if (field === 'completed' && value === true) {
+        setRestTimer(90);
+        const w = parseFloat(sets[setIdx].weight) || 0;
+        const r = parseFloat(sets[setIdx].reps) || 0;
+        const volume = w * r;
+        if (volume > 0 && volume > (ex.personalRecord ?? 0)) {
+          exercises[exIdx] = { ...ex, sets, personalRecord: volume };
+          setNewPRs(prs => new Set([...prs, `${exIdx}-${setIdx}`]));
+          return { ...prev, exercises };
+        }
+      }
+
+      exercises[exIdx] = { ...ex, sets };
+      return { ...prev, exercises };
+    });
+  }
+
+  const totalSets = activeWorkout.exercises.reduce(
+    (a, ex) => a + ex.sets.filter(s => s.completed).length,
+    0,
+  );
+
+  const totalVolume = activeWorkout.exercises.reduce((a, ex) => {
+    return (
+      a +
+      ex.sets
+        .filter(s => s.completed)
+        .reduce((b, s) => b + (parseFloat(s.weight) || 0) * (parseFloat(s.reps) || 1), 0)
+    );
+  }, 0);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <p className="font-pixel text-accent-gold" style={{ fontSize: '11px' }}>
+            {activeWorkout.title}
+          </p>
+          <WorkoutTimer startTime={activeWorkout.startTime} />
+        </div>
+        <div className="flex gap-3 items-center flex-wrap">
+          <span className="font-vt text-text-secondary text-base">{totalSets} sets</span>
+          {totalVolume > 0 && (
+            <span className="font-vt text-accent-gold text-base">
+              Vol: {totalVolume.toLocaleString('es-CO')} kg
+            </span>
+          )}
+          <PixelButton variant="primary" onClick={() => onFinish(activeWorkout)}>
+            ✓ FINALIZAR
+          </PixelButton>
+        </div>
+      </div>
+
+      {restTimer !== null && restTimer > 0 && (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="bg-accent-cyan/10 border-2 border-accent-cyan p-3 text-center"
+        >
+          <p className="font-pixel text-accent-cyan" style={{ fontSize: '9px' }}>
+            DESCANSO
+          </p>
+          <p className="font-pixel text-accent-gold text-2xl">{restTimer}s</p>
+          <button
+            onClick={() => setRestTimer(null)}
+            className="font-vt text-text-secondary text-base"
+          >
+            Saltar
+          </button>
+        </motion.div>
+      )}
+
+      {activeWorkout.exercises.map((ex, exIdx) => {
+        const allSetsCompleted =
+          ex.sets.length > 0 && ex.sets.every(s => s.completed);
+        return (
+          <PixelPanel key={exIdx} className="p-3 space-y-2">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div>
+                <div className="flex items-center gap-2">
+                  <p className="font-vt text-text-primary text-xl">{ex.name}</p>
+                  {allSetsCompleted && (
+                    <motion.span
+                      initial={{ scale: 0 }}
+                      animate={{ scale: 1 }}
+                      className="text-accent-green text-lg"
+                    >
+                      ✅
+                    </motion.span>
+                  )}
+                </div>
+                {ex.muscleGroup && (
+                  <p className="font-pixel text-text-secondary" style={{ fontSize: '7px' }}>
+                    {ex.muscleGroup}
+                  </p>
+                )}
+              </div>
+              {ex.prevBest && (
+                <p className="font-pixel text-text-secondary" style={{ fontSize: '7px' }}>
+                  MEJOR: {ex.prevBest.weight}kg × {ex.prevBest.reps} reps
+                </p>
+              )}
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-center">
+                <thead>
+                  <tr className="border-b border-border-pixel">
+                    {['SET', 'KG', 'REPS', 'ANTERIOR', '✓'].map(h => (
+                      <th
+                        key={h}
+                        className="font-pixel text-text-secondary pb-1 px-1"
+                        style={{ fontSize: '7px' }}
+                      >
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {ex.sets.map((set, setIdx) => {
+                    const isPR = newPRs.has(`${exIdx}-${setIdx}`);
+                    return (
+                      <tr
+                        key={set.id}
+                        className={set.completed ? 'opacity-60' : ''}
+                      >
+                        <td
+                          className="font-pixel text-text-secondary py-1 px-1"
+                          style={{ fontSize: '8px' }}
+                        >
+                          {setIdx + 1}
+                        </td>
+                        <td className="py-1 px-1">
+                          <NumericStepper
+                            value={set.weight}
+                            onChange={v => updateSet(exIdx, setIdx, 'weight', v)}
+                            step={2.5}
+                            disabled={set.completed}
+                          />
+                        </td>
+                        <td className="py-1 px-1">
+                          <NumericStepper
+                            value={set.reps}
+                            onChange={v => updateSet(exIdx, setIdx, 'reps', v)}
+                            step={1}
+                            disabled={set.completed}
+                          />
+                        </td>
+                        <td
+                          className="font-pixel text-text-muted px-1"
+                          style={{ fontSize: '7px', whiteSpace: 'nowrap' }}
+                        >
+                          {ex.prevBest
+                            ? `${ex.prevBest.weight}×${ex.prevBest.reps}`
+                            : '—'}
+                        </td>
+                        <td className="py-1 px-2">
+                          <div className="flex flex-col items-center gap-0.5">
+                            <motion.button
+                              whileTap={{ scale: 0.85 }}
+                              onClick={() =>
+                                updateSet(exIdx, setIdx, 'completed', !set.completed)
+                              }
+                              className={`w-8 h-8 border-2 flex items-center justify-center transition-colors ${
+                                set.completed
+                                  ? 'border-accent-green bg-accent-green text-bg-deep'
+                                  : 'border-border-pixel text-text-secondary hover:border-accent-green'
+                              }`}
+                            >
+                              {set.completed ? '✓' : ''}
+                            </motion.button>
+                            {isPR && (
+                              <motion.span
+                                initial={{ opacity: 0, y: 4 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                className="font-pixel text-accent-gold"
+                                style={{ fontSize: '6px' }}
+                              >
+                                🏆PR
+                              </motion.span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <button
+                onClick={() => addSet(exIdx)}
+                className="font-pixel text-text-secondary hover:text-accent-gold transition-colors"
+                style={{ fontSize: '8px' }}
+              >
+                + SET
+              </button>
+              {ex.sets.filter(s => s.completed).length > 0 && (
+                <span className="font-pixel text-text-secondary" style={{ fontSize: '7px' }}>
+                  Volumen:{' '}
+                  {ex.sets
+                    .filter(s => s.completed)
+                    .reduce(
+                      (a, s) =>
+                        a + (parseFloat(s.weight) || 0) * (parseFloat(s.reps) || 1),
+                      0,
+                    )
+                    .toLocaleString('es-CO')}
+                  kg
+                </span>
+              )}
+            </div>
+          </PixelPanel>
+        );
+      })}
+
+      <PixelButton
+        variant="secondary"
+        onClick={() => setShowExSearch(true)}
+        className="w-full"
+      >
+        + AGREGAR EJERCICIO
+      </PixelButton>
+
+      <AnimatePresence>
+        {showExSearch && (
+          <ExerciseSearchModal
+            onSelect={ex => {
+              addExercise(ex);
+              setShowExSearch(false);
+            }}
+            onClose={() => setShowExSearch(false)}
+          />
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+export default function GymPage() {
+  const { addFloatingXP, triggerLevelUp } = useUIStore();
+  const { updateUser, user } = useAuthStore();
+  const navigate = useNavigate();
+  const toast = useToast();
+
+  const [workouts, setWorkouts] = useState<Workout[]>([]);
+  const [routines, setRoutines] = useState<Routine[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [activeWorkout, setActiveWorkout] = useState<ActiveWorkout | null>(null);
+  const [showStartModal, setShowStartModal] = useState(false);
+  const [showRestTimer, setShowRestTimer] = useState(false);
+  const [newTitle, setNewTitle] = useState('');
+  const [tab, setTab] = useState<'history' | 'routines' | 'analytics' | 'photos'>('history');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [ws, rs] = await Promise.all([
+        workoutService.fetchWorkouts(10),
+        workoutService.fetchRoutines(),
+      ]);
+      setWorkouts(ws);
+      setRoutines(rs);
+    } catch {
+      /* ignore */
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function startWorkout(title?: string) {
+    const t = title ?? newTitle;
+    if (!t.trim()) return;
+    try {
+      const w = await workoutService.createWorkout({ title: t });
+      setActiveWorkout({ id: w.id, title: w.title, startTime: Date.now(), exercises: [] });
+      setShowStartModal(false);
+      setNewTitle('');
+    } catch {
+      toast.error('Error al iniciar entrenamiento');
+    }
+  }
+
+  async function startFromRoutine(routine: Routine) {
+    try {
+      const w = await workoutService.createWorkout({ title: routine.name });
+      const exercises = (routine.exercises as Array<{
+        exerciseId: string;
+        name: string;
+        sets: number;
+        reps?: number;
+      }>).map(re => ({
+        exerciseId: re.exerciseId,
+        name: re.name,
+        muscleGroup: undefined as string | undefined,
+        sets: Array.from({ length: re.sets }, (_, i) => ({
+          id: String(i + 1),
+          weight: '',
+          reps: re.reps ? String(re.reps) : '',
+          completed: false,
+        })),
+        prevBest: null,
+        personalRecord: 0,
+      }));
+      setActiveWorkout({ id: w.id, title: w.title, startTime: Date.now(), exercises });
+    } catch {
+      toast.error('Error al iniciar rutina');
+    }
+  }
+
+  async function finishWorkout(aw: ActiveWorkout) {
+    const duration = Math.round((Date.now() - aw.startTime) / 60000);
+    const exercises = aw.exercises.map((ex, i) => ({
+      exerciseId: ex.exerciseId,
+      sets: ex.sets.map(s => ({
+        weight: Number(s.weight) || 0,
+        reps: Number(s.reps) || 0,
+        completed: s.completed,
+      })),
+      order: i,
+    }));
+
+    try {
+      const result = await workoutService.finishWorkout(aw.id, { duration, exercises });
+      setActiveWorkout(null);
+      updateUser(result.user as never);
+      addFloatingXP(
+        (result.rewards as { xpGained: number }).xpGained ?? 50,
+        window.innerWidth / 2,
+        200,
+      );
+      if ((result.rewards as { leveledUp: boolean }).leveledUp) {
+        triggerLevelUp({
+          oldLevel: (result.rewards as { oldLevel: number }).oldLevel,
+          newLevel: (result.rewards as { newLevel: number }).newLevel,
+          xpEarned: (result.rewards as { xpGained: number }).xpGained,
+          goldEarned: (result.rewards as { goldGained: number }).goldGained,
+          statIncreases: {},
+        });
+      }
+      toast.success(
+        '¡Entrenamiento completado!',
+        `+${(result.rewards as { xpGained: number }).xpGained} XP`,
+      );
+      await load();
+    } catch {
+      toast.error('Error al finalizar entrenamiento');
+    }
+  }
+
+  if (activeWorkout) {
+    return (
+      <div className="space-y-3">
+        {/* Spotify quick-open */}
+        {user?.gymPlaylistUrl && (
+          <div className="flex items-center justify-between bg-bg-panel border border-accent-green/40 px-3 py-2">
+            <p className="font-vt text-text-secondary text-base">🎵 Playlist de entrenamiento</p>
+            <div className="flex gap-2">
+              <a
+                href={user.gymPlaylistUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-pixel text-accent-green border border-accent-green px-2 py-1 hover:bg-accent-green hover:text-bg-deep transition-colors"
+                style={{ fontSize: '8px' }}
+              >
+                ▶ ABRIR SPOTIFY
+              </a>
+              <button
+                onClick={() => navigate('/settings')}
+                className="font-pixel text-text-muted hover:text-text-secondary"
+                style={{ fontSize: '8px' }}
+              >
+                ✏
+              </button>
+            </div>
+          </div>
+        )}
+        {!user?.gymPlaylistUrl && (
+          <div className="flex items-center justify-between bg-bg-panel border border-border-pixel px-3 py-2 opacity-60">
+            <p className="font-pixel text-text-secondary" style={{ fontSize: '7px' }}>🎵 Sin playlist configurada</p>
+            <button
+              onClick={() => navigate('/settings')}
+              className="font-pixel text-accent-gold hover:text-text-primary"
+              style={{ fontSize: '7px' }}
+            >
+              + CONFIGURAR →
+            </button>
+          </div>
+        )}
+        <ActiveWorkoutView
+          workout={activeWorkout}
+          onUpdate={setActiveWorkout}
+          onFinish={finishWorkout}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="font-pixel text-accent-gold" style={{ fontSize: '14px' }}>
+            ⚔️ EL COLISEO
+          </h1>
+          <p className="font-vt text-text-secondary text-base">Forja tu cuerpo, héroe</p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <SageContextButton message="¿Qué entreno hoy? Sugiere un workout basado en mi historial y los días que llevo sin entrenar." label="¿Qué entreno hoy?" />
+          <PixelButton variant="ghost" onClick={() => setShowRestTimer(true)}>
+            ⏱ DESCANSO
+          </PixelButton>
+          <PixelButton variant="primary" onClick={() => setShowStartModal(true)}>
+            ⚔️ INICIAR
+          </PixelButton>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-0 overflow-x-auto">
+        {([
+          { id: 'history',   label: 'HISTORIAL' },
+          { id: 'routines',  label: 'RUTINAS' },
+          { id: 'analytics', label: 'ANÁLISIS' },
+          { id: 'photos',    label: 'PROGRESO' },
+        ] as const).map(({ id, label }) => (
+          <button
+            key={id}
+            onClick={() => setTab(id)}
+            className={`font-pixel px-4 py-2 border-b-2 transition-colors whitespace-nowrap ${
+              tab === id
+                ? 'border-accent-gold text-accent-gold'
+                : 'border-transparent text-text-secondary hover:text-text-primary'
+            }`}
+            style={{ fontSize: '8px' }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {loading ? (
+        <div className="space-y-3">
+          {[1, 2, 3].map((i) => <div key={i} className="skeleton h-24 rounded-2xl" />)}
+        </div>
+      ) : tab === 'history' ? (
+        workouts.length === 0 ? (
+          <PixelPanel className="p-8 text-center">
+            <p className="text-4xl mb-3">⚔️</p>
+            <p className="font-pixel text-text-secondary" style={{ fontSize: '9px' }}>
+              EL COLISEO ESPERA
+            </p>
+            <p className="font-vt text-text-secondary text-base mt-1">
+              Inicia tu primer entrenamiento para comenzar
+            </p>
+          </PixelPanel>
+        ) : (
+          <div className="space-y-3">
+            <AnimatePresence>
+              {workouts.map((w, i) => (
+                <motion.div
+                  key={w.id}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.05 }}
+                >
+                  <PixelPanel className="p-3 hover:border-accent-gold/50 transition-colors">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-vt text-text-primary text-xl">{w.title}</p>
+                        <p
+                          className="font-pixel text-text-secondary"
+                          style={{ fontSize: '7px' }}
+                        >
+                          {new Date(w.date).toLocaleDateString('es-CO', {
+                            weekday: 'short',
+                            month: 'short',
+                            day: 'numeric',
+                          })}
+                          {w.duration ? ` · ${w.duration}min` : ''}
+                          {' · '}
+                          {w.exercises?.length ?? 0} ejercicios
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-vt text-accent-gold text-lg">+{w.xpEarned} XP</p>
+                        <p className="font-vt text-accent-gold text-base">
+                          +{w.goldEarned} 🪙
+                        </p>
+                      </div>
+                    </div>
+                    {w.exercises?.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {w.exercises.map((ex, idx) => (
+                          <span
+                            key={idx}
+                            className="font-pixel text-text-secondary border border-border-pixel px-2 py-0.5"
+                            style={{ fontSize: '7px' }}
+                          >
+                            {ex.exerciseName}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </PixelPanel>
+                </motion.div>
+              ))}
+            </AnimatePresence>
+          </div>
+        )
+      ) : (
+        // Routines tab
+        <div className="space-y-3">
+          {routines.length === 0 ? (
+            <PixelPanel className="p-8 text-center">
+              <p className="font-vt text-text-secondary text-base">Sin rutinas aún</p>
+            </PixelPanel>
+          ) : (
+            routines.map((r, i) => (
+              <motion.div
+                key={r.id}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.05 }}
+              >
+                <PixelPanel className="p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-vt text-text-primary text-xl">{r.name}</p>
+                      {r.description && (
+                        <p
+                          className="font-pixel text-text-secondary"
+                          style={{ fontSize: '7px' }}
+                        >
+                          {r.description}
+                        </p>
+                      )}
+                      <p
+                        className="font-pixel text-text-muted mt-1"
+                        style={{ fontSize: '7px' }}
+                      >
+                        {(r.exercises as { name: string }[])
+                          .map(e => e.name)
+                          .join(' · ')}
+                      </p>
+                    </div>
+                    <PixelButton
+                      variant="primary"
+                      onClick={() => startFromRoutine(r)}
+                      className="flex-shrink-0"
+                    >
+                      ▶ INICIAR
+                    </PixelButton>
+                  </div>
+                  {r.estimatedDuration && (
+                    <p
+                      className="font-pixel text-text-secondary mt-2"
+                      style={{ fontSize: '7px' }}
+                    >
+                      ~{r.estimatedDuration} min
+                    </p>
+                  )}
+                </PixelPanel>
+              </motion.div>
+            ))
+          )}
+        </div>
+      )}
+
+      {tab === 'analytics' && (
+        <div className="space-y-4">
+          <BodyWeightTracker />
+          <OneRMCalculator />
+          <WeeklyVolumeWidget />
+        </div>
+      )}
+
+      {tab === 'photos' && (
+        <ProgressPhotos />
+      )}
+
+      {/* Rest Timer Modal */}
+      <AnimatePresence>
+        {showRestTimer && <RestTimer onClose={() => setShowRestTimer(false)} />}
+      </AnimatePresence>
+
+      {/* Start workout modal */}
+      <AnimatePresence>
+        {showStartModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4"
+            onClick={() => setShowStartModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.85, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 350, damping: 28 }}
+              className="bg-bg-panel border-2 border-border-pixel p-5 w-full max-w-sm space-y-4"
+              onClick={e => e.stopPropagation()}
+            >
+              <p className="font-pixel text-accent-gold" style={{ fontSize: '10px' }}>
+                NUEVO ENTRENAMIENTO
+              </p>
+              <input
+                type="text"
+                value={newTitle}
+                onChange={e => setNewTitle(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && startWorkout()}
+                placeholder="Nombre del entrenamiento..."
+                autoFocus
+                className="w-full bg-bg-deep border-2 border-border-pixel text-text-primary font-vt text-lg px-3 py-2 focus:border-accent-gold outline-none"
+              />
+              <div className="flex gap-2">
+                <PixelButton
+                  variant="ghost"
+                  onClick={() => setShowStartModal(false)}
+                  className="flex-1"
+                >
+                  Cancelar
+                </PixelButton>
+                <PixelButton
+                  variant="primary"
+                  onClick={() => startWorkout()}
+                  className="flex-1"
+                  disabled={!newTitle.trim()}
+                >
+                  ¡Empezar!
+                </PixelButton>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}

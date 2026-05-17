@@ -1,0 +1,28 @@
+{
+  "expo": {
+    "name": "LifeQuest",
+    "slug": "lifequest",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "lifequest",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0d0620",
+    "splash": {
+      "backgroundColor": "#0d0620"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.lifequest.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0d0620"
+      },
+      "package": "com.lifequest.app"
+    },
+    "plugins": [
+      "expo-notifications",
+      "expo-secure-store"
+    ]
+  }
+}

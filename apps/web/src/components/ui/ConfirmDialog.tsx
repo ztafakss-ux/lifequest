@@ -1,0 +1,60 @@
+import { motion } from 'framer-motion';
+import { useEscapeKey } from '../../hooks/useEscapeKey';
+
+interface Props {
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+  danger?: boolean;
+}
+
+export function ConfirmDialog({ title, message, confirmLabel = 'Confirmar', cancelLabel = 'Cancelar', onConfirm, onCancel, danger = false }: Props) {
+  useEscapeKey(onCancel);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[300] flex items-center justify-center bg-black/70 px-4"
+      onClick={onCancel}
+    >
+      <motion.div
+        initial={{ scale: 0.9, opacity: 0, y: 16 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        exit={{ scale: 0.9, opacity: 0 }}
+        transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+        className="bg-[var(--bg-panel)] border-2 border-[var(--border)] p-6 w-full max-w-sm space-y-4"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="space-y-2">
+          <p className="font-pixel text-[var(--text-primary)]" style={{ fontSize: '10px' }}>{title}</p>
+          <p className="font-vt text-[var(--text-secondary)] text-base">{message}</p>
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={onCancel}
+            className="flex-1 border-2 border-[var(--border)] px-3 py-2 font-pixel text-[var(--text-secondary)] hover:border-[var(--text-secondary)] transition-colors"
+            style={{ fontSize: '8px' }}
+          >
+            {cancelLabel}
+          </button>
+          <button
+            onClick={onConfirm}
+            className={`flex-1 border-2 px-3 py-2 font-pixel transition-colors ${
+              danger
+                ? 'border-[var(--accent-red)] bg-[var(--accent-red)] text-white hover:brightness-110'
+                : 'border-[var(--accent-gold)] bg-[var(--accent-gold)] text-[var(--bg-deep)] hover:brightness-110'
+            }`}
+            style={{ fontSize: '8px' }}
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}

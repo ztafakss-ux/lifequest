@@ -1,0 +1,1090 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum QuestType {
+  MAIN
+  SIDE
+  DAILY
+  WEEKLY
+}
+
+enum QuestStatus {
+  ACTIVE
+  COMPLETED
+  FAILED
+  ARCHIVED
+}
+
+enum QuestDifficulty {
+  EASY
+  NORMAL
+  HARD
+  EPIC
+}
+
+enum QuestCategory {
+  HEALTH
+  FITNESS
+  FINANCE
+  LEARNING
+  LOVE
+  SOCIAL
+  PERSONAL
+  CREATIVE
+}
+
+enum TransactionType {
+  INCOME
+  EXPENSE
+}
+
+enum TransactionCategory {
+  FOOD
+  TRANSPORT
+  ENTERTAINMENT
+  SAVINGS
+  INVESTMENT
+  HEALTH
+  EDUCATION
+  CLOTHING
+  UTILITIES
+  HOUSING
+  SUBSCRIPTIONS
+  OTHER
+}
+
+enum RelationshipStatus {
+  SINGLE
+  IN_RELATIONSHIP
+  COMPLICATED
+  PREFER_NOT_TO_SAY
+}
+
+// ─── Models ──────────────────────────────────────────────────────────────────
+
+model User {
+  id           String @id @default(cuid())
+  email        String @unique
+  username     String @unique
+  passwordHash String
+  displayName  String @default("Miguel Ángel")
+
+  level         Int @default(1)
+  xp            Int @default(0)
+  xpToNextLevel Int @default(100)
+  gold          Int @default(0)
+
+  hp           Int @default(100)
+  maxHp        Int @default(100)
+  mp           Int @default(100)
+  maxMp        Int @default(100)
+  strength     Int @default(1)
+  intelligence Int @default(1)
+  charisma     Int @default(1)
+
+  avatarConfig Json @default("{\"hairColor\":\"#4a3728\",\"skinColor\":\"#c68642\",\"shirtColor\":\"#4d96ff\",\"pants\":\"#37474f\",\"accessory\":null,\"pet\":null}")
+
+  timezone           String             @default("America/Bogota")
+  currency           String             @default("COP")
+  language           String             @default("es")
+  relationshipStatus RelationshipStatus @default(SINGLE)
+
+  onboardingCompleted Boolean   @default(false)
+  birthDate           DateTime?
+  currentStreak       Int       @default(0)
+  longestStreak       Int       @default(0)
+  lastActivityDate    DateTime?
+
+  inviteCode         String?  @unique
+  sageCallsToday     Int      @default(0)
+  sageCallsResetAt   DateTime @default(now())
+
+  gymPlaylistUrl     String?
+
+  googleAccessToken  String?
+  googleRefreshToken String?
+  spotifyAccessToken String?
+  spotifyRefreshToken String?
+  googleFitConnected Boolean  @default(false)
+
+  playerClass    String?
+  classChosenAt  DateTime?
+  activeTheme    String   @default("aurora")
+  bedtimeGoal    String?
+  morningBriefingLastSeen DateTime?
+
+  // Fase 9 — Glow Up
+  lifeScore           Int @default(0)
+  fitnessLevel        Int @default(1)
+  financeLevel        Int @default(1)
+  mindLevel           Int @default(1)
+  relationshipLevel   Int @default(1)
+  disciplineLevel     Int @default(1)
+  focusMinutesTotal   Int @default(0)
+
+  refreshTokenHash String?
+  lastLoginAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  quests                  Quest[]
+  questCompletions        QuestCompletion[]
+  habits                  Habit[]
+  habitLogs               HabitLog[]
+  transactions            Transaction[]
+  budgets                 Budget[]
+  financialGoals          FinancialGoal[]
+  workouts                Workout[]
+  meals                   Meal[]
+  sleepLogs               SleepLog[]
+  journalEntries          JournalEntry[]
+  inventoryItems          InventoryItem[]
+  achievements            UserAchievement[]
+  relationships           Relationship[]
+  routines                Routine[]
+  learningItems           LearningItem[]
+  xpEvents                XpEvent[]
+  pushSubscriptions       PushSubscription[]
+  notificationPreferences NotificationPreferences?
+  sentFriendRequests      Friendship[]             @relation("SentRequests")
+  receivedFriendRequests  Friendship[]             @relation("ReceivedRequests")
+  createdChallenges       Challenge[]
+  challengeParticipants   ChallengeParticipant[]
+  guildMembership         GuildMember?
+  guildMessages           GuildMessage[]
+  sageMemories            SageMemory[]
+  sageInsights            SageInsight[]
+  seasonParticipants      SeasonParticipant[]
+  agendaEvents            AgendaEvent[]
+  bodyWeights             BodyWeight[]
+  progressPhotos          ProgressPhoto[]
+  debts                   Debt[]
+  recurringTransactions   RecurringTransaction[]
+  nutritionGoal           NutritionGoal?
+  savedMeals              SavedMeal[]
+  giftIdeas               GiftIdea[]
+  masterGoals             MasterGoal[]
+  rituals                 Ritual[]
+  ritualLogs              RitualLog[]
+  dailyCheckins           DailyCheckin[]
+  sageScrolls             SageScroll[]
+  focusSessions           FocusSession[]
+  inAppNotifications      Notification[]
+
+  @@map("users")
+}
+
+model Quest {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  title       String
+  description String?
+  type        QuestType
+  status      QuestStatus     @default(ACTIVE)
+  difficulty  QuestDifficulty @default(NORMAL)
+  category    QuestCategory
+
+  xpReward   Int @default(50)
+  goldReward Int @default(10)
+
+  deadline    DateTime?
+  completedAt DateTime?
+
+  isRecurring Boolean   @default(false)
+  resetCron   String?
+  lastResetAt DateTime?
+
+  subObjectives Json @default("[]")
+
+  parentQuestId String?
+  parentQuest   Quest?  @relation("SubQuests", fields: [parentQuestId], references: [id])
+  subQuests     Quest[] @relation("SubQuests")
+
+  completions QuestCompletion[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("quests")
+}
+
+model QuestCompletion {
+  id      String @id @default(cuid())
+  questId String
+  quest   Quest  @relation(fields: [questId], references: [id], onDelete: Cascade)
+  userId  String
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  xpEarned    Int
+  goldEarned  Int
+  completedAt DateTime @default(now())
+  notes       String?
+
+  @@map("quest_completions")
+}
+
+model Habit {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  title       String
+  description String?
+  category    QuestCategory
+
+  icon  String @default("⭐")
+  color String @default("#ffd23f")
+
+  xpReward   Int @default(20)
+  goldReward Int @default(5)
+
+  currentStreak Int @default(0)
+  longestStreak Int @default(0)
+
+  frequency    Json    @default("{\"type\":\"daily\",\"days\":[]}")
+  resetTime    String  @default("04:00")
+  reminderTime String?
+  isActive     Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  logs HabitLog[]
+
+  @@map("habits")
+}
+
+model HabitLog {
+  id      String @id @default(cuid())
+  habitId String
+  habit   Habit  @relation(fields: [habitId], references: [id], onDelete: Cascade)
+  userId  String
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  completed Boolean
+  status    String   @default("completed") // "completed" | "failed" | "skipped"
+  date      DateTime
+  notes     String?
+  loggedAt  DateTime @default(now())
+
+  @@unique([habitId, date])
+  @@map("habit_logs")
+}
+
+model Transaction {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  type        TransactionType
+  amount      Decimal             @db.Decimal(15, 2)
+  currency    String              @default("COP")
+  category    TransactionCategory
+  description String?
+  date        DateTime
+
+  budgetId String?
+  budget   Budget? @relation(fields: [budgetId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("transactions")
+}
+
+model Budget {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  category     TransactionCategory
+  amount       Decimal             @db.Decimal(15, 2)
+  month        Int
+  year         Int
+  currency     String              @default("COP")
+
+  transactions Transaction[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, category, month, year])
+  @@map("budgets")
+}
+
+model FinancialGoal {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  title         String
+  description   String?
+  targetAmount  Decimal   @db.Decimal(15, 2)
+  currentAmount Decimal   @default(0) @db.Decimal(15, 2)
+  currency      String    @default("COP")
+
+  deadline    DateTime?
+  isCompleted Boolean   @default(false)
+  completedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("financial_goals")
+}
+
+model Workout {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  title      String
+  notes      String?
+  duration   Int?
+  date       DateTime
+  xpEarned   Int      @default(0)
+  goldEarned Int      @default(0)
+
+  exercises WorkoutExercise[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("workouts")
+}
+
+model Exercise {
+  id          String  @id @default(cuid())
+  name        String  @unique
+  muscleGroup String?
+  equipment   String?
+
+  workoutExercises WorkoutExercise[]
+
+  @@map("exercises")
+}
+
+model WorkoutExercise {
+  id         String   @id @default(cuid())
+  workoutId  String
+  workout    Workout  @relation(fields: [workoutId], references: [id], onDelete: Cascade)
+  exerciseId String
+  exercise   Exercise @relation(fields: [exerciseId], references: [id])
+
+  sets  Json   @default("[]")
+  notes String?
+  order Int    @default(0)
+
+  @@map("workout_exercises")
+}
+
+model Meal {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name     String
+  mealType String
+  calories Int?
+  protein  Float?
+  carbs    Float?
+  fat      Float?
+  waterMl  Int?
+  date     DateTime
+
+  createdAt DateTime @default(now())
+
+  @@map("meals")
+}
+
+model SleepLog {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  bedtime          DateTime
+  wakeTime         DateTime
+  duration         Float
+  quality          Int
+  notes            String?
+  date             DateTime
+  sleepScore       Int?
+  caffeineLate     Boolean?
+  screensBeforeBed Boolean?
+  exercisedToday   Boolean?
+
+  createdAt DateTime @default(now())
+
+  @@map("sleep_logs")
+}
+
+model JournalEntry {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  title   String?
+  content String
+  mood    Int?
+  date    DateTime
+  tags    String[] @default([])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("journal_entries")
+}
+
+model Routine {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name              String
+  description       String?
+  exercises         Json @default("[]")
+  targetDays        Json @default("[]")
+  estimatedDuration Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("routines")
+}
+
+model LearningItem {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  type            String
+  title           String
+  author          String?
+  platform        String?
+  status          String   @default("NOT_STARTED")
+  currentProgress Int      @default(0)
+  totalProgress   Int      @default(0)
+  rating          Int?
+  notes           String?
+  richNotes       Json     @default("[]")
+  vocabularyCards Json     @default("[]")
+  startedAt       DateTime?
+  completedAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("learning_items")
+}
+
+model ShopItem {
+  id          String  @id @default(cuid())
+  name        String
+  description String?
+  type        String
+  cost        Int
+  imageKey    String?
+
+  levelRequired Int     @default(1)
+  isLimited     Boolean @default(false)
+
+  inventoryItems InventoryItem[]
+
+  createdAt DateTime @default(now())
+
+  @@map("shop_items")
+}
+
+model InventoryItem {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shopItemId String
+  shopItem   ShopItem @relation(fields: [shopItemId], references: [id])
+
+  isEquipped  Boolean   @default(false)
+  purchasedAt DateTime  @default(now())
+  usedAt      DateTime?
+  expiresAt   DateTime?
+
+  @@map("inventory_items")
+}
+
+model Achievement {
+  id          String @id @default(cuid())
+  key         String @unique
+  title       String
+  description String
+  badgeImage  String?
+  xpReward    Int    @default(0)
+
+  icon           String  @default("🏆")
+  category       String  @default("general") // quest, habit, level, special
+  progressType   String? // quest_count, habit_streak, level, category_quest_count
+  progressTarget Int?
+
+  userAchievements UserAchievement[]
+
+  @@map("achievements")
+}
+
+model PushSubscription {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  endpoint String @unique
+  p256dh   String
+  auth     String
+
+  createdAt DateTime @default(now())
+
+  @@map("push_subscriptions")
+}
+
+model NotificationPreferences {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  habitReminders      Boolean @default(true)
+  questDeadlineAlerts Boolean @default(true)
+  dailySummary        Boolean @default(true)
+  dailySummaryTime    String  @default("21:00")
+  achievementAlerts   Boolean @default(true)
+  levelUpAlerts       Boolean @default(true)
+
+  quietHoursStart String? // "22:00"
+  quietHoursEnd   String? // "07:00"
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("notification_preferences")
+}
+
+model UserAchievement {
+  id            String      @id @default(cuid())
+  userId        String
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievementId String
+  achievement   Achievement @relation(fields: [achievementId], references: [id])
+
+  unlockedAt DateTime @default(now())
+
+  @@unique([userId, achievementId])
+  @@map("user_achievements")
+}
+
+model Relationship {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name      String
+  type      String
+  isPartner Boolean @default(false)
+
+  importantDates Json   @default("[]")
+  notes          String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("relationships")
+}
+
+model XpEvent {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  xpAmount    Int
+  goldAmount  Int
+  source      String
+  sourceId    String?
+  description String
+  createdAt   DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@map("xp_events")
+}
+
+// ─── Social / Multiplayer ─────────────────────────────────────────────────────
+
+model Friendship {
+  id          String   @id @default(cuid())
+  requesterId String
+  requester   User     @relation("SentRequests", fields: [requesterId], references: [id], onDelete: Cascade)
+  receiverId  String
+  receiver    User     @relation("ReceivedRequests", fields: [receiverId], references: [id], onDelete: Cascade)
+  status      String   @default("PENDING") // PENDING | ACCEPTED | REJECTED
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([requesterId, receiverId])
+  @@map("friendships")
+}
+
+model Challenge {
+  id          String   @id @default(cuid())
+  creatorId   String
+  creator     User     @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  title       String
+  description String?
+  type        String   // quests_completed | habits_streak | gym_sessions | savings_percent
+  targetValue Int
+  goldWager   Int      @default(0)
+  startDate   DateTime
+  endDate     DateTime
+  isPublic    Boolean  @default(false)
+  status      String   @default("ACTIVE") // ACTIVE | FINISHED | CANCELLED
+
+  participants ChallengeParticipant[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("challenges")
+}
+
+model ChallengeParticipant {
+  id           String    @id @default(cuid())
+  challengeId  String
+  challenge    Challenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  currentValue Int       @default(0)
+  isWinner     Boolean   @default(false)
+  joinedAt     DateTime  @default(now())
+
+  @@unique([challengeId, userId])
+  @@map("challenge_participants")
+}
+
+model Guild {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  emblem      String   @default("shield")
+  leaderId    String
+  level       Int      @default(1)
+  xp          Int      @default(0)
+  inviteCode  String   @unique
+
+  members  GuildMember[]
+  messages GuildMessage[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("guilds")
+}
+
+model GuildMember {
+  id       String   @id @default(cuid())
+  guildId  String
+  guild    Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  userId   String   @unique
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role     String   @default("MEMBER") // LEADER | OFFICER | MEMBER
+  joinedAt DateTime @default(now())
+
+  @@map("guild_members")
+}
+
+model GuildMessage {
+  id        String   @id @default(cuid())
+  guildId   String
+  guild     Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content   String
+  createdAt DateTime @default(now())
+
+  @@map("guild_messages")
+}
+
+// ─── Sage Memory ──────────────────────────────────────────────────────────────
+
+model SageMemory {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      String   // 'user' | 'sage'
+  content   String
+  topic     String?  // 'habits' | 'finances' | 'gym' | 'general' | 'quests'
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@map("sage_memories")
+}
+
+model SageInsight {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  insight   String
+  category  String   // 'pattern' | 'achievement' | 'warning' | 'suggestion'
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@map("sage_insights")
+}
+
+// ─── Agenda ───────────────────────────────────────────────────────────────────
+
+model AgendaEvent {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  title       String
+  description String?
+  category    String    @default("personal") // personal | work | health | social | romantic | finance | other
+
+  startDate   DateTime
+  endDate     DateTime?
+  isAllDay    Boolean   @default(false)
+
+  location    String?
+  reminder    Int?      // minutes before notification (30, 60, 1440)
+
+  isCompleted    Boolean   @default(false)
+  color          String?
+
+  isRecurring    Boolean   @default(false)
+  recurrenceRule String?
+  recurrenceEnd  DateTime?
+  eventType      String    @default("personal") // personal | quest | habit
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([userId, startDate])
+  @@map("agenda_events")
+}
+
+// ─── Phase 8 Models ───────────────────────────────────────────────────────────
+
+model BodyWeight {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  weight    Float
+  date      DateTime
+  notes     String?
+  createdAt DateTime @default(now())
+
+  @@index([userId, date])
+  @@map("body_weights")
+}
+
+model ProgressPhoto {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  photoData String
+  date      DateTime
+  notes     String?
+  createdAt DateTime @default(now())
+
+  @@index([userId, date])
+  @@map("progress_photos")
+}
+
+model Debt {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title          String
+  type           String   // 'owe' | 'owed'
+  originalAmount Decimal  @db.Decimal(15, 2)
+  currentAmount  Decimal  @db.Decimal(15, 2)
+  interestRate   Float?
+  personName     String?
+  dueDate        DateTime?
+  isPaid         Boolean  @default(false)
+  payments       DebtPayment[]
+  createdAt      DateTime @default(now())
+
+  @@map("debts")
+}
+
+model DebtPayment {
+  id        String   @id @default(cuid())
+  debtId    String
+  debt      Debt     @relation(fields: [debtId], references: [id], onDelete: Cascade)
+  amount    Decimal  @db.Decimal(15, 2)
+  date      DateTime
+  notes     String?
+  createdAt DateTime @default(now())
+
+  @@map("debt_payments")
+}
+
+model RecurringTransaction {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        String   // INCOME | EXPENSE
+  amount      Decimal  @db.Decimal(15, 2)
+  category    String
+  description String
+  dayOfMonth  Int
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  @@map("recurring_transactions")
+}
+
+model NutritionGoal {
+  id       String @id @default(cuid())
+  userId   String @unique
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  calories Int?
+  protein  Float?
+  carbs    Float?
+  fat      Float?
+  waterMl  Int?   @default(2000)
+
+  @@map("nutrition_goals")
+}
+
+model SavedMeal {
+  id         String  @id @default(cuid())
+  userId     String
+  user       User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name       String
+  calories   Int?
+  protein    Float?
+  carbs      Float?
+  fat        Float?
+  isFavorite Boolean @default(true)
+
+  @@map("saved_meals")
+}
+
+model GiftIdea {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  relationshipId String?
+  name           String
+  description    String?
+  url            String?
+  estimatedPrice Decimal? @db.Decimal(15, 2)
+  occasion       String?
+  isPurchased    Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  @@map("gift_ideas")
+}
+
+// ─── Phase 9 Models ───────────────────────────────────────────────────────────
+
+model MasterGoal {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  title       String
+  description String?
+  category    String   // 'fitness' | 'finance' | 'career' | 'personal' | 'relationship' | 'health'
+  icon        String   @default("🎯")
+
+  targetDate  DateTime?
+  why         String?
+
+  milestones  GoalMilestone[]
+
+  status      String   @default("ACTIVE") // ACTIVE | ACHIEVED | PAUSED
+  progress    Int      @default(0)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  achievedAt  DateTime?
+
+  @@map("master_goals")
+}
+
+model GoalMilestone {
+  id          String     @id @default(cuid())
+  goalId      String
+  goal        MasterGoal @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  title       String
+  isCompleted Boolean    @default(false)
+  completedAt DateTime?
+  order       Int
+
+  @@map("goal_milestones")
+}
+
+model Ritual {
+  id        String       @id @default(cuid())
+  userId    String
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  type      String       // 'morning' | 'night' | 'custom'
+  icon      String       @default("⚡")
+  isActive  Boolean      @default(true)
+  steps     RitualStep[]
+  logs      RitualLog[]
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  @@map("rituals")
+}
+
+model RitualStep {
+  id          String @id @default(cuid())
+  ritualId    String
+  ritual      Ritual @relation(fields: [ritualId], references: [id], onDelete: Cascade)
+  title       String
+  durationMin Int?
+  order       Int
+
+  @@map("ritual_steps")
+}
+
+model RitualLog {
+  id          String   @id @default(cuid())
+  ritualId    String
+  ritual      Ritual   @relation(fields: [ritualId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  completedAt DateTime @default(now())
+  date        DateTime
+
+  @@index([ritualId, date])
+  @@map("ritual_logs")
+}
+
+model DailyCheckin {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mood      Int      // 1-5
+  energy    Int      // 1-10
+  note      String?
+  date      DateTime
+  createdAt DateTime @default(now())
+
+  @@unique([userId, date])
+  @@map("daily_checkins")
+}
+
+model SageScroll {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  message   String
+  category  String   // 'warning' | 'praise' | 'nudge' | 'milestone'
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@map("sage_scrolls")
+}
+
+model FocusSession {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  questId     String?
+  taskLabel   String?
+  durationMin Int
+  xpEarned    Int      @default(0)
+  completedAt DateTime @default(now())
+
+  @@index([userId, completedAt])
+  @@map("focus_sessions")
+}
+
+model WisdomCard {
+  id          String  @id @default(cuid())
+  quote       String
+  author      String?
+  category    String  // 'discipline' | 'mindset' | 'finance' | 'health' | 'relationships' | 'growth'
+  levelRequired Int   @default(1)
+
+  @@map("wisdom_cards")
+}
+
+// ─── Seasons / Boss Raids ─────────────────────────────────────────────────────
+
+model Season {
+  id          String   @id @default(cuid())
+  name        String
+  description String
+  bossName    String
+  bossHp      Int
+  currentHp   Int
+  startDate   DateTime
+  endDate     DateTime
+  isActive    Boolean  @default(true)
+  rewards     Json     @default("[]")
+
+  participants SeasonParticipant[]
+  events       SeasonEvent[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("seasons")
+}
+
+model SeasonParticipant {
+  id            String  @id @default(cuid())
+  seasonId      String
+  season        Season  @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  damageDealt   Int     @default(0)
+  rewardClaimed Boolean @default(false)
+
+  @@unique([seasonId, userId])
+  @@map("season_participants")
+}
+
+model SeasonEvent {
+  id          String   @id @default(cuid())
+  seasonId    String
+  season      Season   @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  name        String
+  description String
+  bonusXpMult Float    @default(1.5)
+  category    String?
+  startDate   DateTime
+  endDate     DateTime
+
+  @@map("season_events")
+}
+
+model Notification {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  type   String  // 'achievement' | 'streak' | 'reminder' | 'sage' | 'goal' | 'levelup' | 'system'
+  title  String
+  body   String
+  icon   String?
+  link   String?
+  isRead Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, isRead])
+  @@map("notifications")
+}

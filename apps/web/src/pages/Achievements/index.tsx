@@ -1,0 +1,169 @@
+import { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { PixelPanel } from '../../components/ui/PixelPanel';
+import { AchievementCard } from '../../components/achievements/AchievementCard';
+import { fetchAchievements } from '../../services/achievement.service';
+import type { Achievement } from '../../services/achievement.service';
+
+const CATEGORY_TABS = [
+  { key: '',        label: 'Todos',    icon: '🏆' },
+  { key: 'quest',   label: 'Misiones', icon: '⚔️' },
+  { key: 'habit',   label: 'Hábitos',  icon: '🔥' },
+  { key: 'level',   label: 'Nivel',    icon: '⬆️' },
+  { key: 'category', label: 'Categoría', icon: '📋' },
+  { key: 'special', label: 'Especiales', icon: '✨' },
+] as const;
+
+export default function AchievementsPage() {
+  const [achievements, setAchievements] = useState<Achievement[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('');
+  const [selectedAch, setSelectedAch] = useState<Achievement | null>(null);
+
+  useEffect(() => {
+    fetchAchievements()
+      .then(setAchievements)
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const filtered = activeTab
+    ? achievements.filter((a) => a.category === activeTab)
+    : achievements;
+
+  const unlockedCount = achievements.filter((a) => a.unlocked).length;
+  const totalXp = achievements.filter((a) => a.unlocked).reduce((s, a) => s + a.xpReward, 0);
+
+  return (
+    <div className="space-y-4">
+      {/* Header */}
+      <div>
+        <h1 className="font-pixel text-accent-gold" style={{ fontSize: '14px' }}>🏆 SALA DE LOGROS</h1>
+        <p className="font-vt text-text-secondary text-base">
+          {unlockedCount}/{achievements.length} desbloqueados · {totalXp.toLocaleString()} XP ganados
+        </p>
+      </div>
+
+      {/* Progress bar global */}
+      <div>
+        <div className="flex justify-between font-pixel mb-1" style={{ fontSize: '7px' }}>
+          <span className="text-text-secondary">PROGRESO GLOBAL</span>
+          <span className="text-accent-gold">{Math.round(achievements.length > 0 ? (unlockedCount / achievements.length) * 100 : 0)}%</span>
+        </div>
+        <div className="h-2 bg-bg-panel border-2 border-border-pixel">
+          <motion.div
+            className="h-full bg-accent-gold"
+            initial={{ width: 0 }}
+            animate={{ width: `${achievements.length > 0 ? (unlockedCount / achievements.length) * 100 : 0}%` }}
+            transition={{ duration: 1, ease: 'easeOut' }}
+          />
+        </div>
+      </div>
+
+      {/* Category tabs */}
+      <div className="flex gap-1 overflow-x-auto pb-1">
+        {CATEGORY_TABS.map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
+            className={`flex-shrink-0 px-3 py-1.5 border-2 font-pixel transition-all ${
+              activeTab === tab.key
+                ? 'border-accent-gold bg-accent-gold text-bg-deep'
+                : 'border-border-pixel text-text-secondary hover:border-text-secondary'
+            }`}
+            style={{ fontSize: '7px' }}
+          >
+            {tab.icon} {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Achievement grid */}
+      {loading ? (
+        <div className="text-center py-12">
+          <motion.p className="font-vt text-text-secondary text-xl" animate={{ opacity: [1, 0.4, 1] }} transition={{ duration: 1.2, repeat: Infinity }}>
+            Cargando logros...
+          </motion.p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {/* Unlocked first */}
+          {[...filtered.filter(a => a.unlocked), ...filtered.filter(a => !a.unlocked)].map((ach, i) => (
+            <motion.div
+              key={ach.id}
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.03, duration: 0.2 }}
+            >
+              <AchievementCard achievement={ach} onClick={setSelectedAch} />
+            </motion.div>
+          ))}
+        </div>
+      )}
+
+      {/* Detail modal */}
+      <AnimatePresence>
+        {selectedAch && (
+          <motion.div
+            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setSelectedAch(null)} />
+            <motion.div
+              className="relative bg-bg-panel border-2 border-border-pixel w-full max-w-sm z-10 p-6 text-center"
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.8, opacity: 0 }}
+              style={selectedAch.unlocked ? { boxShadow: '0 0 30px #ffd23f44' } : {}}
+            >
+              <motion.div
+                className={`text-6xl mb-4 ${!selectedAch.unlocked ? 'grayscale opacity-40' : ''}`}
+                animate={selectedAch.unlocked ? { scale: [1, 1.1, 1] } : {}}
+                transition={{ duration: 1.5, repeat: Infinity }}
+              >
+                {selectedAch.icon}
+              </motion.div>
+              <h3 className={`font-pixel mb-2 ${selectedAch.unlocked ? 'text-accent-gold' : 'text-text-secondary'}`} style={{ fontSize: '11px' }}>
+                {selectedAch.title}
+              </h3>
+              <p className="font-vt text-text-primary text-base mb-4">{selectedAch.description}</p>
+
+              {selectedAch.unlocked ? (
+                <div className="space-y-1">
+                  <p className="font-pixel text-accent-gold" style={{ fontSize: '9px' }}>✓ DESBLOQUEADO</p>
+                  {selectedAch.unlockedAt && (
+                    <p className="font-vt text-text-secondary text-sm">
+                      {new Date(selectedAch.unlockedAt).toLocaleDateString('es-CO', { year: 'numeric', month: 'long', day: 'numeric' })}
+                    </p>
+                  )}
+                  {selectedAch.xpReward > 0 && (
+                    <p className="font-pixel text-accent-gold" style={{ fontSize: '8px' }}>+{selectedAch.xpReward} XP</p>
+                  )}
+                </div>
+              ) : (
+                <div>
+                  <p className="font-pixel text-text-secondary" style={{ fontSize: '8px' }}>🔒 BLOQUEADO</p>
+                  {selectedAch.progress !== null && selectedAch.target && (
+                    <p className="font-vt text-text-secondary text-sm mt-1">
+                      {selectedAch.progress}/{selectedAch.target}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              <button
+                onClick={() => setSelectedAch(null)}
+                className="mt-4 font-pixel text-text-secondary hover:text-text-primary border-2 border-border-pixel px-4 py-1"
+                style={{ fontSize: '8px' }}
+              >
+                CERRAR
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}

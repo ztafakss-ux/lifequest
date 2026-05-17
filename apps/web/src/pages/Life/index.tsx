@@ -1,0 +1,232 @@
+import { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
+import { RadarChart, Radar, PolarGrid, PolarAngleAxis, ResponsiveContainer } from 'recharts';
+import { PixelPanel } from '../../components/ui/PixelPanel';
+import { fetchLifeScore, fetchCorrelations, fetchYearInReview } from '../../services/lifescore.service';
+import type { LifeScore, YearInReview } from '../../services/lifescore.service';
+
+const AREA_LABELS: Record<string, string> = {
+  habits: 'Hábitos', finances: 'Finanzas', fitness: 'Fitness',
+  quests: 'Quests', learning: 'Aprendizaje', relationships: 'Relaciones', journal: 'Diario',
+};
+
+const AREA_WEIGHTS: Record<string, number> = {
+  habits: 25, finances: 20, fitness: 15, quests: 15, learning: 10, relationships: 10, journal: 5,
+};
+
+const AREA_COLORS: Record<string, string> = {
+  habits: '#6bcf7f', finances: '#ffd23f', fitness: '#ff6b6b',
+  quests: '#4d96ff', learning: '#c77dff', relationships: '#ff9f43', journal: '#48dbfb',
+};
+
+function ScoreRing({ score }: { score: number }) {
+  const circumference = 2 * Math.PI * 70;
+  const color = score >= 75 ? '#6bcf7f' : score >= 50 ? '#ffd23f' : '#ff6b6b';
+  return (
+    <div className="flex justify-center py-4">
+      <div className="relative w-48 h-48">
+        <svg className="w-full h-full -rotate-90" viewBox="0 0 160 160">
+          <circle cx="80" cy="80" r="70" fill="none" stroke="var(--bg-deep)" strokeWidth="12" />
+          <motion.circle
+            cx="80" cy="80" r="70" fill="none"
+            stroke={color}
+            strokeWidth="12"
+            strokeDasharray={circumference}
+            initial={{ strokeDashoffset: circumference }}
+            animate={{ strokeDashoffset: circumference * (1 - score / 100) }}
+            transition={{ duration: 1.2, ease: 'easeOut' }}
+            strokeLinecap="round"
+          />
+        </svg>
+        <div className="absolute inset-0 flex flex-col items-center justify-center">
+          <motion.p
+            className="font-pixel"
+            style={{ fontSize: '36px', color }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.5 }}
+          >
+            {score}
+          </motion.p>
+          <p className="font-pixel text-text-secondary" style={{ fontSize: '8px' }}>LIFE SCORE</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function LifePage() {
+  const [lifeScore, setLifeScore] = useState<LifeScore | null>(null);
+  const [correlations, setCorrelations] = useState<string[]>([]);
+  const [yearReview, setYearReview] = useState<YearInReview | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState<'score' | 'correlations' | 'year'>('score');
+
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([
+      fetchLifeScore(),
+      fetchCorrelations(),
+      fetchYearInReview(),
+    ]).then(([ls, cr, yr]) => {
+      setLifeScore(ls);
+      setCorrelations(cr);
+      setYearReview(yr);
+    }).catch(() => null).finally(() => setLoading(false));
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="text-center py-12">
+        <motion.p className="font-vt text-text-secondary text-xl" animate={{ opacity: [1, 0.4, 1] }} transition={{ duration: 1.2, repeat: Infinity }}>
+          Calculando Life Score...
+        </motion.p>
+      </div>
+    );
+  }
+
+  const radarData = lifeScore
+    ? Object.entries(lifeScore.breakdown).map(([key, val]) => ({
+        area: AREA_LABELS[key] ?? key,
+        score: Math.round(val),
+        fullMark: 100,
+      }))
+    : [];
+
+  const barData = lifeScore
+    ? Object.entries(lifeScore.breakdown).map(([key, val]) => ({
+        name: AREA_LABELS[key] ?? key,
+        score: Math.round(val),
+        weight: AREA_WEIGHTS[key],
+        color: AREA_COLORS[key],
+      }))
+    : [];
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h1 className="font-pixel text-accent-gold" style={{ fontSize: '14px' }}>⭐ LIFE SCORE</h1>
+        <p className="font-vt text-text-secondary text-base">Tu puntuación de vida en tiempo real</p>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-1">
+        {([['score', '⭐ Score'], ['correlations', '🔗 Correlaciones'], ['year', '🏆 Año en Revisión']] as const).map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => setTab(key)}
+            className={`flex-shrink-0 px-3 py-1.5 border-2 font-pixel transition-all ${tab === key ? 'border-accent-gold bg-accent-gold text-bg-deep' : 'border-border-pixel text-text-secondary hover:border-text-secondary'}`}
+            style={{ fontSize: '8px' }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* Score tab */}
+      {tab === 'score' && lifeScore && (
+        <div className="space-y-4">
+          <PixelPanel className="p-4">
+            <ScoreRing score={lifeScore.total} />
+            <p className="text-center font-vt text-text-secondary text-base">
+              {lifeScore.total >= 75 ? '🌟 ¡Héroe legendario!' : lifeScore.total >= 50 ? '⚔️ Aventurero en progreso' : '🌱 Comenzando la aventura'}
+            </p>
+          </PixelPanel>
+
+          {/* Radar chart */}
+          <PixelPanel className="p-4">
+            <p className="font-pixel text-text-secondary mb-3" style={{ fontSize: '8px' }}>ÁREAS DE VIDA</p>
+            <ResponsiveContainer width="100%" height={250}>
+              <RadarChart data={radarData}>
+                <PolarGrid stroke="var(--border)" />
+                <PolarAngleAxis dataKey="area" tick={{ fontFamily: 'VT323', fontSize: 13, fill: 'var(--text-secondary)' }} />
+                <Radar dataKey="score" stroke="var(--accent-gold)" fill="var(--accent-gold)" fillOpacity={0.25} />
+              </RadarChart>
+            </ResponsiveContainer>
+          </PixelPanel>
+
+          {/* Bar breakdown */}
+          <PixelPanel className="p-4">
+            <p className="font-pixel text-text-secondary mb-3" style={{ fontSize: '8px' }}>DETALLE POR ÁREA</p>
+            <div className="space-y-3">
+              {barData.map(d => (
+                <div key={d.name}>
+                  <div className="flex justify-between mb-1">
+                    <span className="font-vt text-text-primary text-base">{d.name}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-pixel text-text-secondary" style={{ fontSize: '7px' }}>PESO {d.weight}%</span>
+                      <span className="font-pixel" style={{ fontSize: '9px', color: d.color }}>{d.score}/100</span>
+                    </div>
+                  </div>
+                  <div className="stat-bar h-3">
+                    <motion.div
+                      className="h-full"
+                      style={{ background: d.color }}
+                      initial={{ width: 0 }}
+                      animate={{ width: `${d.score}%` }}
+                      transition={{ duration: 0.8, ease: 'easeOut' }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </PixelPanel>
+        </div>
+      )}
+
+      {/* Correlations tab */}
+      {tab === 'correlations' && (
+        <div className="space-y-3">
+          <p className="font-pixel text-text-secondary" style={{ fontSize: '8px' }}>PATRONES DETECTADOS EN TUS DATOS</p>
+          {correlations.length === 0 ? (
+            <PixelPanel className="p-8 text-center">
+              <p className="text-4xl mb-2">🔍</p>
+              <p className="font-pixel text-text-secondary" style={{ fontSize: '9px' }}>SIN SUFICIENTES DATOS</p>
+              <p className="font-vt text-text-secondary text-base mt-1">Registra más datos para ver correlaciones</p>
+            </PixelPanel>
+          ) : (
+            correlations.map((c, i) => (
+              <motion.div key={i} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
+                <PixelPanel className="p-4">
+                  <div className="flex items-start gap-3">
+                    <span className="text-2xl flex-shrink-0">📊</span>
+                    <p className="font-vt text-text-primary text-lg">{c}</p>
+                  </div>
+                </PixelPanel>
+              </motion.div>
+            ))
+          )}
+        </div>
+      )}
+
+      {/* Year in Review tab */}
+      {tab === 'year' && yearReview && (
+        <div className="space-y-4">
+          <PixelPanel className="p-5 text-center">
+            <p className="font-pixel text-accent-gold" style={{ fontSize: '12px' }}>🏆 {yearReview.year} EN REVISIÓN</p>
+            {yearReview.bestMonth && (
+              <p className="font-vt text-text-secondary text-base mt-1">Mejor mes: {yearReview.bestMonth.month}</p>
+            )}
+          </PixelPanel>
+
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            {[
+              { label: 'XP GANADO', value: yearReview.totalXp.toLocaleString('es-CO'), icon: '⚡' },
+              { label: 'ENTRENAMIENTOS', value: yearReview.totalWorkouts, icon: '🏋️' },
+              { label: 'NOCHES REGISTRADAS', value: Math.round(yearReview.avgSleepHours * 100) / 100 + 'h prom', icon: '🌙' },
+              { label: 'QUESTS COMPLETADAS', value: yearReview.totalQuestsCompleted, icon: '📜' },
+              { label: 'ENTRADAS DEL DIARIO', value: yearReview.totalJournalEntries, icon: '📝' },
+              { label: 'LIBROS/CURSOS', value: yearReview.totalBooksCompleted, icon: '📚' },
+            ].map(s => (
+              <PixelPanel key={s.label} className="p-3 text-center">
+                <p className="text-2xl">{s.icon}</p>
+                <p className="font-pixel text-accent-gold mt-1" style={{ fontSize: '16px' }}>{s.value}</p>
+                <p className="font-pixel text-text-secondary" style={{ fontSize: '6px' }}>{s.label}</p>
+              </PixelPanel>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

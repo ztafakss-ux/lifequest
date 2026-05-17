@@ -1,0 +1,172 @@
+import { prisma } from '../lib/prisma';
+import type { QuestCategory } from '@prisma/client';
+import { damageSeasonBoss } from './season.service';
+
+export function xpForLevel(level: number): number {
+  return Math.round(level * 100 * Math.pow(1.15, level));
+}
+
+export function xpForNextLevel(currentLevel: number): number {
+  return Math.floor(100 * currentLevel * Math.pow(1.15, currentLevel - 1));
+}
+
+export interface StatIncreases {
+  strength?: number;
+  intelligence?: number;
+  charisma?: number;
+  hp?: number;
+  mp?: number;
+}
+
+export interface AwardResult {
+  leveledUp: boolean;
+  oldLevel: number;
+  newLevel: number;
+  xpGained: number;
+  goldGained: number;
+  statIncreases: StatIncreases;
+}
+
+const CATEGORY_WEIGHTS: Record<QuestCategory, { str: number; int: number; cha: number }> = {
+  FITNESS:  { str: 0.6,  int: 0.2, cha: 0.2 },
+  HEALTH:   { str: 0.3,  int: 0.4, cha: 0.3 },
+  FINANCE:  { str: 0.1,  int: 0.6, cha: 0.3 },
+  LEARNING: { str: 0.1,  int: 0.7, cha: 0.2 },
+  LOVE:     { str: 0.1,  int: 0.2, cha: 0.7 },
+  SOCIAL:   { str: 0.1,  int: 0.3, cha: 0.6 },
+  PERSONAL: { str: 0.2,  int: 0.4, cha: 0.4 },
+  CREATIVE: { str: 0.1,  int: 0.5, cha: 0.4 },
+};
+
+function pickStatFromCategory(category: QuestCategory | undefined): 'strength' | 'intelligence' | 'charisma' {
+  const weights = category ? CATEGORY_WEIGHTS[category] : { str: 0.33, int: 0.34, cha: 0.33 };
+  const roll = Math.random();
+  if (roll < weights.str) return 'strength';
+  if (roll < weights.str + weights.int) return 'intelligence';
+  return 'charisma';
+}
+
+const CLASS_MULTIPLIERS: Record<string, Partial<Record<QuestCategory, number>>> = {
+  warrior: { FITNESS: 1.2, HEALTH: 1.1 },
+  mage: { LEARNING: 1.2, CREATIVE: 1.1 },
+  merchant: { FINANCE: 1.2 },
+  paladin: { LOVE: 1.2, HEALTH: 1.2, SOCIAL: 1.1 },
+};
+
+const CLASS_GOLD_MULT: Record<string, number> = {
+  merchant: 1.2,
+};
+
+function applyClassMultiplier(playerClass: string | null, category: QuestCategory | undefined, xp: number, gold: number): { xp: number; gold: number } {
+  if (!playerClass) return { xp, gold };
+  const catMult = category ? (CLASS_MULTIPLIERS[playerClass]?.[category] ?? 1) : 1;
+  const goldMult = CLASS_GOLD_MULT[playerClass] ?? 1;
+  return { xp: Math.round(xp * catMult), gold: Math.round(gold * goldMult) };
+}
+
+export async function awardXpAndGold(
+  userId: string,
+  xp: number,
+  gold: number,
+  source: string,
+  options?: { sourceId?: string; description?: string; category?: QuestCategory }
+): Promise<AwardResult> {
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+  const multiplied = applyClassMultiplier(user.playerClass, options?.category, xp, gold);
+  xp = multiplied.xp;
+  gold = multiplied.gold;
+
+  let currentXp = user.xp + xp;
+  let currentLevel = user.level;
+  let currentXpToNext = user.xpToNextLevel;
+  const oldLevel = user.level;
+  const levelsGained: number[] = [];
+
+  while (currentXp >= currentXpToNext) {
+    currentXp -= currentXpToNext;
+    currentLevel += 1;
+    currentXpToNext = xpForLevel(currentLevel);
+    levelsGained.push(currentLevel);
+  }
+
+  const leveledUp = currentLevel > oldLevel;
+  const statIncreases: StatIncreases = {};
+
+  if (leveledUp) {
+    // HP/MP increase per level
+    const hpIncrease = levelsGained.length * 10;
+    const mpIncrease = levelsGained.length * 5;
+    statIncreases.hp = hpIncrease;
+    statIncreases.mp = mpIncrease;
+
+    // Stat increase per level (weighted by category)
+    for (const lvl of levelsGained) {
+      const statKey = pickStatFromCategory(options?.category);
+      statIncreases[statKey] = (statIncreases[statKey] ?? 0) + 1;
+
+      // Every 5 levels: all stats +1 bonus
+      if (lvl % 5 === 0) {
+        statIncreases.strength = (statIncreases.strength ?? 0) + 1;
+        statIncreases.intelligence = (statIncreases.intelligence ?? 0) + 1;
+        statIncreases.charisma = (statIncreases.charisma ?? 0) + 1;
+      }
+    }
+  }
+
+  const newMaxHp = Math.min(user.maxHp + (statIncreases.hp ?? 0), 300);
+  const newMaxMp = Math.min(user.maxMp + (statIncreases.mp ?? 0), 250);
+
+  // Update streak
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const lastActivity = user.lastActivityDate ? new Date(user.lastActivityDate) : null;
+  if (lastActivity) lastActivity.setHours(0, 0, 0, 0);
+
+  const isNewDay = !lastActivity || lastActivity.getTime() < today.getTime();
+  const isYesterday = lastActivity &&
+    lastActivity.getTime() === today.getTime() - 86400000;
+
+  let newStreak = user.currentStreak;
+  if (isNewDay) {
+    newStreak = isYesterday ? user.currentStreak + 1 : 1;
+  }
+  const newLongest = Math.max(user.longestStreak, newStreak);
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      xp: currentXp,
+      level: currentLevel,
+      xpToNextLevel: currentXpToNext,
+      gold: { increment: gold },
+      lastActivityDate: new Date(),
+      currentStreak: newStreak,
+      longestStreak: newLongest,
+      ...(leveledUp && {
+        maxHp: newMaxHp,
+        maxMp: newMaxMp,
+        strength: { increment: statIncreases.strength ?? 0 },
+        intelligence: { increment: statIncreases.intelligence ?? 0 },
+        charisma: { increment: statIncreases.charisma ?? 0 },
+      }),
+    },
+  });
+
+  // Log the event
+  await prisma.xpEvent.create({
+    data: {
+      userId,
+      xpAmount: xp,
+      goldAmount: gold,
+      source,
+      sourceId: options?.sourceId,
+      description: options?.description ?? source,
+    },
+  });
+
+  // Deal damage to the active season boss (fire-and-forget)
+  const bossDamage = Math.max(1, Math.floor(xp / 5));
+  damageSeasonBoss(userId, bossDamage).catch(() => null);
+
+  return { leveledUp, oldLevel, newLevel: currentLevel, xpGained: xp, goldGained: gold, statIncreases };
+}
